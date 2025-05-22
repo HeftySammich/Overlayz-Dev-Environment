@@ -607,55 +607,151 @@ document.addEventListener('DOMContentLoaded', () => {
     // Process and display NFTs
     const nftElements = await Promise.all(pageNFTs.map(async nft => {
       let imageUrl = 'https://via.placeholder.com/150';
+      console.log(`Processing NFT ${nft.token_id}:${nft.serial_number}`, nft);
+      
+      // Check if this is a Hashinal NFT
+      // Hashinals are typically identified by their specific metadata format
+      let isHashinal = false;
+      let hashinalData = null;
+      
       if (nft.metadata) {
-        // Decode the base64 metadata
-        const metadataStr = atob(nft.metadata);
-        console.log(`Decoded metadata for NFT ${nft.serial_number}:`, metadataStr);
-        // Check if metadataStr is an IPFS URL
-        if (metadataStr.startsWith('ipfs://')) {
-          const ipfsHash = metadataStr.replace('ipfs://', '');
-          const metadataUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
-          console.log(`Fetching metadata from: ${metadataUrl}`);
-          try {
-            // Fetch the metadata JSON from the IPFS URL
-            const metadataResponse = await fetch(metadataUrl);
-            const metadata = await metadataResponse.json();
-            console.log(`Metadata for NFT ${nft.serial_number}:`, metadata);
-            if (metadata.image) {
-              // Handle the image URL from the metadata
-              if (metadata.image.startsWith('ipfs://')) {
-                const imageHash = metadata.image.replace('ipfs://', '');
-                imageUrl = `https://ipfs.io/ipfs/${imageHash}`;
-              } else {
-                imageUrl = metadata.image;
-              }
-              console.log(`Final image URL for NFT ${nft.serial_number}:`, imageUrl);
-            }
-          } catch (e) {
-            console.error(`Error fetching metadata from IPFS for NFT ${nft.serial_number}:`, e);
-          }
-        } else {
-          // If metadataStr isn't an IPFS URL, try parsing it as JSON
+        try {
+          const metadataStr = atob(nft.metadata);
+          
+          // Try to parse as JSON first
           try {
             const metadata = JSON.parse(metadataStr);
-            console.log(`Metadata for NFT ${nft.serial_number}:`, metadata);
-            if (metadata.image) {
-              if (metadata.image.startsWith('ipfs://')) {
-                const imageHash = metadata.image.replace('ipfs://', '');
-                imageUrl = `https://ipfs.io/ipfs/${imageHash}`;
-              } else {
-                imageUrl = metadata.image;
-              }
-              console.log(`Final image URL for NFT ${nft.serial_number}:`, imageUrl);
+            // Check for Hashinal-specific properties
+            if (metadata.hasOwnProperty('p') || metadata.hasOwnProperty('op') || 
+                (metadata.hasOwnProperty('standard') && metadata.standard === 'hashinal')) {
+              isHashinal = true;
+              hashinalData = metadata;
+              console.log('Detected Hashinal NFT via JSON metadata:', hashinalData);
             }
           } catch (e) {
-            console.error(`Metadata parse error for NFT ${nft.serial_number}:`, e);
+            // Not JSON, check if it's a Hashinal inscription format
+            if (metadataStr.includes('data:image/') || 
+                metadataStr.includes('hashinal') || 
+                metadataStr.match(/^(op|p)=.+/)) {
+              isHashinal = true;
+              hashinalData = metadataStr;
+              console.log('Detected Hashinal NFT via raw metadata:', hashinalData);
+            }
           }
+        } catch (e) {
+          console.error(`Error decoding metadata for NFT ${nft.serial_number}:`, e);
         }
       }
+      
+      if (isHashinal) {
+        // Handle Hashinal NFT
+        try {
+          // First approach: Try to use the token_id and serial_number to construct URL
+          // This is the most common pattern for Hashinals
+          const tokenIdParts = nft.token_id.split('.');
+          const tokenNum = tokenIdParts[tokenIdParts.length - 1];
+          
+          // Primary Hashinal image URL (based on Kantor's implementation)
+          imageUrl = `https://hashpack.b-cdn.net/hashinals/${tokenNum}/${nft.serial_number}`;
+          console.log(`Using Hashinal URL for NFT ${nft.serial_number}:`, imageUrl);
+          
+          // Second approach: If the metadata contains a direct image
+          if (hashinalData && typeof hashinalData === 'object' && hashinalData.image) {
+            // Use the image URL from metadata
+            if (hashinalData.image.startsWith('ipfs://')) {
+              const imageHash = hashinalData.image.replace('ipfs://', '');
+              imageUrl = `https://ipfs.io/ipfs/${imageHash}`;
+            } else if (hashinalData.image.startsWith('data:image/')) {
+              // Use the data URL directly
+              imageUrl = hashinalData.image;
+            } else {
+              imageUrl = hashinalData.image;
+            }
+          } else if (typeof hashinalData === 'string' && hashinalData.startsWith('data:image/')) {
+            // The metadata itself is a data URL
+            imageUrl = hashinalData;
+          }
+        } catch (e) {
+          console.error(`Error handling Hashinal NFT ${nft.serial_number}:`, e);
+        }
+      } else if (nft.metadata) {
+        // Regular metadata handling for non-Hashinal NFTs
+        try {
+          // Decode the base64 metadata
+          const metadataStr = atob(nft.metadata);
+          console.log(`Decoded metadata for NFT ${nft.serial_number}:`, metadataStr);
+          
+          // Check if metadataStr is an IPFS URL
+          if (metadataStr.startsWith('ipfs://')) {
+            const ipfsHash = metadataStr.replace('ipfs://', '');
+            const metadataUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
+            console.log(`Fetching metadata from: ${metadataUrl}`);
+            try {
+              // Fetch the metadata JSON from the IPFS URL
+              const metadataResponse = await fetch(metadataUrl);
+              const metadata = await metadataResponse.json();
+              console.log(`Metadata for NFT ${nft.serial_number}:`, metadata);
+              if (metadata.image) {
+                // Handle the image URL from the metadata
+                if (metadata.image.startsWith('ipfs://')) {
+                  const imageHash = metadata.image.replace('ipfs://', '');
+                  imageUrl = `https://ipfs.io/ipfs/${imageHash}`;
+                } else {
+                  imageUrl = metadata.image;
+                }
+                console.log(`Final image URL for NFT ${nft.serial_number}:`, imageUrl);
+              }
+            } catch (e) {
+              console.error(`Error fetching metadata from IPFS for NFT ${nft.serial_number}:`, e);
+            }
+          } else {
+            // If metadataStr isn't an IPFS URL, try parsing it as JSON
+            try {
+              const metadata = JSON.parse(metadataStr);
+              console.log(`Metadata for NFT ${nft.serial_number}:`, metadata);
+              if (metadata.image) {
+                if (metadata.image.startsWith('ipfs://')) {
+                  const imageHash = metadata.image.replace('ipfs://', '');
+                  imageUrl = `https://ipfs.io/ipfs/${imageHash}`;
+                } else {
+                  imageUrl = metadata.image;
+                }
+                console.log(`Final image URL for NFT ${nft.serial_number}:`, imageUrl);
+              }
+            } catch (e) {
+              console.error(`Metadata parse error for NFT ${nft.serial_number}:`, e);
+              // If JSON parsing fails, try using the metadata string directly as a URL
+              if (metadataStr.match(/^https?:\/\//)) {
+                imageUrl = metadataStr;
+                console.log(`Using metadata string as direct URL: ${imageUrl}`);
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Error decoding metadata for NFT ${nft.serial_number}:`, e);
+        }
+      }
+      
+      // Store alternative URLs for fallback
+      const alternativeUrls = [];
+      if (isHashinal) {
+        const tokenNum = nft.token_id.split('.').pop();
+        alternativeUrls.push(
+          `https://hashpack.b-cdn.net/hashinals/${tokenNum}/${nft.serial_number}`,
+          `https://hashpack-s3-bucket.s3.amazonaws.com/hashinals/${tokenNum}-${nft.serial_number}.png`,
+          `https://hashinals.s3.amazonaws.com/${tokenNum}-${nft.serial_number}.png`,
+          `https://hashinals-mainnet.s3.amazonaws.com/${tokenNum}-${nft.serial_number}.png`,
+          `https://hashinals.b-cdn.net/${tokenNum}/${nft.serial_number}`
+        );
+      }
+      
       return `
-        <div class="nft-item" data-serial="${nft.serial_number}">
-          <img src="${imageUrl}" alt="NFT" onerror="this.src='https://via.placeholder.com/150?text=NFT'" onclick="selectNFT(this)">
+        <div class="nft-item" data-serial="${nft.serial_number}" data-token-id="${nft.token_id}" data-is-hashinal="${isHashinal}">
+          <img src="${imageUrl}" alt="NFT" 
+               data-alt-urls="${encodeURIComponent(JSON.stringify(alternativeUrls))}"
+               data-current-url-index="0"
+               onerror="handleImageError(this)" 
+               onclick="selectNFT(this)">
           <p>Serial: ${nft.serial_number}</p>
         </div>
       `;
@@ -787,3 +883,29 @@ function showImageShareModal(imageDataURL) {
     }
   });
 }
+
+// Add this function to the global scope for the onerror handler
+window.handleImageError = function(img) {
+  console.log('Image failed to load:', img.src);
+  
+  // Check if there are alternative URLs to try
+  if (img.dataset.altUrls) {
+    try {
+      const altUrls = JSON.parse(decodeURIComponent(img.dataset.altUrls));
+      const currentIndex = parseInt(img.dataset.currentUrlIndex || 0);
+      
+      // Try the next URL if available
+      if (currentIndex < altUrls.length) {
+        console.log(`Trying alternative URL ${currentIndex + 1}/${altUrls.length}:`, altUrls[currentIndex]);
+        img.src = altUrls[currentIndex];
+        img.dataset.currentUrlIndex = currentIndex + 1;
+        return;
+      }
+    } catch (e) {
+      console.error('Error parsing alternative URLs:', e);
+    }
+  }
+  
+  // If all else fails, use placeholder
+  img.src = 'https://via.placeholder.com/150?text=NFT';
+};
